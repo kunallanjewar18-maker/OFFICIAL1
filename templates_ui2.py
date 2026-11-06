@@ -797,17 +797,42 @@ T["admin_telegram.html"] = T["admin_telegram.html"].replace(
 <p class=hint>Open your bot in Telegram and press Start first""", 1)
 T["admin_telegram.html"] = T["admin_telegram.html"].replace(
  """<div class=card><h3>Test</h3>""",
- """<div class=card><h3>Premium emoji picker</h3>
-<p class=hint>Each normal emoji the bot uses is shown with the premium emoji it will become. Tap a row, then tap the emoji you like from your packs below. It is used in every message at once. {% if n_over %}({{n_over}} chosen by you){% endif %}</p>
-<div id=erole style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">{% for r in roles %}<button type=button class=erole data-r="{{r.em}}" title="{{r.label}}" style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:12px;color:inherit"><span style="font-size:20px">{{r.em}}</span><span>&rarr;</span>{% if r.cid %}<img class=ep src="/admin/emoji/thumb/{{r.cid}}" width=26 height=26 alt="">{% else %}<img class=ep width=26 height=26 alt="" style="display:none"><span class=eno class=mu>none</span>{% endif %}</button>{% endfor %}</div>
-<div id=ehint class=mu style="margin-bottom:8px">Tap the emoji you want to replace first.</div>
-<details><summary style="cursor:pointer"><b>Open my emoji packs</b> ({{cat|length}} emoji)</summary>
+ """<div class=card id=emgr><h3>Emoji ID manager</h3>
+<p class=hint>Every emoji the bot uses is listed here. <b>Paste a premium emoji ID</b> in the box and press <b>Save</b> &mdash; it is used in every message at once. Empty the box and Save to go back to automatic.
+{% if n_over %}({{n_over}} set by you){% endif %}</p>
+<p class=hint><b>How to get an ID:</b> open your bot in Telegram (as admin) and send it any premium emoji (or a <code>t.me/addemoji/...</code> pack link). It replies with the ID of each emoji. You can copy that ID here.</p>
+<style>.er{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;margin:6px 0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:12px}.er .em{font-size:22px;min-width:28px;text-align:center}.er .lb{min-width:92px;font-size:13px;opacity:.75}.er img{width:30px;height:30px;object-fit:contain}.er input{flex:1;min-width:150px;margin:0}.er button{padding:7px 12px}.er .ms{width:100%;font-size:12px;min-height:14px}</style>
+<div id=erows>{% for r in roles %}<div class=er data-r="{{r.em}}"><span class=em>{{r.em}}</span><span class=lb>{{r.label}}</span>&rarr;{% if r.cid %}<img class=ep src="/admin/emoji/thumb/{{r.cid}}" alt="">{% else %}<img class=ep alt="" style="display:none">{% endif %}<input class=eid inputmode=numeric placeholder="Emoji ID" value="{{r.mine}}"><button type=button class=sv>Save</button><span class=ms></span></div>{% endfor %}</div>
+<h3 style="margin-top:18px">Add any emoji</h3>
+<p class=hint>Type or paste any normal emoji (the one used in the bot message) and the premium emoji ID it should become.</p>
+<div class=er id=eadd><input id=enew placeholder="Normal emoji, e.g. &#128293;" style="max-width:150px;flex:0 0 150px;font-size:20px"><span>&rarr;</span><input id=enewid class=eid inputmode=numeric placeholder="Emoji ID"><button type=button id=eaddb>Add</button><span class=ms id=eaddm></span></div>
+<div id=eextra>{% for r in extras %}<div class=er data-r="{{r.em}}"><span class=em>{{r.em}}</span><span class=lb>Added by you</span>&rarr;<img class=ep src="/admin/emoji/thumb/{{r.cid}}" alt=""><input class=eid inputmode=numeric value="{{r.cid}}"><button type=button class=sv>Save</button><button type=button class="sv rm r">Remove</button><span class=ms></span></div>{% endfor %}</div>
+<details style="margin-top:14px"><summary style="cursor:pointer"><b>Paste many at once</b></summary>
+<p class=hint>One per line: the emoji, a space, the ID. (You can paste the bot's reply directly.)</p>
+<textarea id=ebulk rows=5 placeholder="&#9989; 5368324170671202286&#10;&#128273; 5314504236132747481" style="width:100%"></textarea>
+<button type=button id=ebulkb style="margin-top:6px">Apply all</button> <span class=ms id=ebulkm></span></details>
+<details style="margin-top:14px"><summary style="cursor:pointer"><b>Pick from my emoji packs</b> ({{cat|length}} emoji)</summary>
+<p class=hint>Tap an emoji below to copy its ID into the box you last touched.</p>
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:6px;margin-top:10px">{% for pk,ix,cid,em in cat %}<button type=button class=ecell data-c="{{cid}}" title="{{pk}} #{{ix}}" style="padding:4px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px"><img loading=lazy src="/admin/emoji/thumb/{{cid}}" width=40 height=40 alt="{{em}}"></button>{% else %}<div class=mu>Packs not loaded yet (bot token must work). Reload in a few seconds.</div>{% endfor %}</div></details>
-<form method=post style="margin-top:10px" onsubmit="return confirm('Back to automatic emoji?')"><input type=hidden name=action value=reset_emoji><button class=r>Reset to automatic</button></form>
-<script>(function(){var cur=null,hint=document.getElementById('ehint');
-function post(role,cid,btn){fetch('/admin/emoji/set',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:role,cid:cid})}).then(function(r){return r.json()}).then(function(j){if(!j.ok)return;var im=btn.querySelector('.ep'),no=btn.querySelector('.eno');if(j.cid){im.src='/admin/emoji/thumb/'+j.cid;im.style.display='';if(no)no.style.display='none'}hint.textContent='Saved. Next messages use it.'}).catch(function(){hint.textContent='Could not save, try again'})}
-document.querySelectorAll('.erole').forEach(function(b){b.addEventListener('click',function(){document.querySelectorAll('.erole').forEach(function(x){x.style.outline=''});cur=b;b.style.outline='2px solid var(--ac,#4f8cff)';hint.textContent='Now tap an emoji from the packs below for '+b.dataset.r})});
-document.querySelectorAll('.ecell').forEach(function(c){c.addEventListener('click',function(){if(!cur){hint.textContent='First tap the emoji you want to replace (top row).';return}post(cur.dataset.r,c.dataset.c,cur)})})})();</script></div>
+<form method=post style="margin-top:12px" onsubmit="return confirm('Remove ALL your emoji IDs and go back to automatic?')"><input type=hidden name=action value=reset_emoji><button class=r>Reset to automatic</button></form>
+<script>(function(){var last=null;
+function J(u,b){return fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json().then(function(j){j.status=r.status;return j})})}
+function save(row,idv,done){var ms=row.querySelector('.ms');ms.textContent='Saving...';
+J('/admin/emoji/set',{role:row.dataset.r,cid:idv}).then(function(j){if(!j.ok){ms.style.color='#ff6b6b';ms.textContent=j.msg||'Could not save';return}
+var im=row.querySelector('.ep');if(j.cid){im.src='/admin/emoji/thumb/'+j.cid+'?t='+Date.now();im.style.display=''}else{im.style.display='none'}
+ms.style.color=j.found===false?'#ffb020':'#3ddc97';ms.textContent=j.found===false?'Saved, but Telegram does not know this ID - check it':(idv?'Saved. Next messages use it.':'Back to automatic.');if(done)done(j)}).catch(function(){ms.style.color='#ff6b6b';ms.textContent='Could not save, try again'})}
+function wire(row){var inp=row.querySelector('.eid');inp.addEventListener('focus',function(){last=inp});
+row.querySelector('.sv').addEventListener('click',function(){save(row,inp.value.trim())});
+var rm=row.querySelector('.rm');if(rm)rm.addEventListener('click',function(){save(row,'',function(){row.remove()})})}
+document.querySelectorAll('#erows .er,#eextra .er').forEach(wire);
+document.getElementById('enewid').addEventListener('focus',function(){last=this});
+document.getElementById('eaddb').addEventListener('click',function(){var e=document.getElementById('enew').value.trim(),i=document.getElementById('enewid').value.trim(),m=document.getElementById('eaddm');
+if(!e||!i){m.textContent='Fill both: the emoji and its ID';return}
+var row=document.createElement('div');row.className='er';row.dataset.r=e;row.innerHTML='<span class=em></span><span class=lb>Added by you</span>&rarr;<img class=ep alt="" style="display:none"><input class=eid inputmode=numeric><button type=button class=sv>Save</button><button type=button class="sv rm r">Remove</button><span class=ms></span>';
+row.querySelector('.em').textContent=e;row.querySelector('.eid').value=i;
+save(row,i,function(){document.getElementById('eextra').prepend(row);wire(row);document.getElementById('enew').value='';document.getElementById('enewid').value='';m.textContent=''});})
+document.getElementById('ebulkb').addEventListener('click',function(){var m=document.getElementById('ebulkm');J('/admin/emoji/bulk',{text:document.getElementById('ebulk').value}).then(function(j){m.textContent=j.ok?(j.n+' saved - reloading...'):'No valid lines found';if(j.ok)setTimeout(function(){location.reload()},800)})});
+document.querySelectorAll('.ecell').forEach(function(c){c.addEventListener('click',function(){if(!last){alert('First tap an ID box above, then tap the emoji.');return}last.value=c.dataset.c;last.focus()})})})();</script></div>
 <div class=card><h3>Test</h3>""", 1)
 
 TEMPLATES = T

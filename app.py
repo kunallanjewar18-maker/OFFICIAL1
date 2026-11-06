@@ -1790,7 +1790,7 @@ def admin_telegram():
                            admin_id=tg_admin(), dev_check=get_setting("dev_check", "1") == "1",
                            otp_global=otp_global_on(), rs=rs, log=list(bot.log), poll_err=bot.poll_err, me_err=bot.me_err,
                            sent_ok=bot.sent_ok, sent_fail=bot.sent_fail, seen=seen_unlinked(),
-                           tok_src=tg_token_source(), roles=emoji_roles(),
+                           tok_src=tg_token_source(), roles=emoji_roles(), extras=emoji_extras(),
                            cat=bot.catalog(), n_over=len(emoji_overrides()),
                            active=dev_check_on(), prem_on=get_setting("prem_on", "1") == "1", prem=bot.status(), page="telegram")
 
@@ -1799,8 +1799,20 @@ def emoji_roles():
     ov, out = emoji_overrides(), []
     for em, label in EMOJI_ROLES:
         cid = ov.get(em) or bot.emap.get(em.replace("\ufe0f", "")) or ""
-        out.append(dict(em=em, label=label, cid=cid, manual=bool(ov.get(em))))
+        out.append(dict(em=em, label=label, cid=cid, manual=bool(ov.get(em)), mine=ov.get(em) or ""))
     return out
+
+
+def emoji_extras():
+    """Emoji added by the admin that are not in the fixed list (Admin > Telegram > Emoji ID manager > Add any emoji)."""
+    known = {e for e, _ in EMOJI_ROLES}
+    return [dict(em=k, cid=v) for k, v in emoji_overrides().items() if k not in known]
+
+
+def valid_emoji_key(k):
+    """A plain emoji (1-12 characters, no letters/digits/spaces) that can be replaced by a premium emoji."""
+    k = (k or "").strip()
+    return 0 < len(k) <= 12 and not re.search(r"[A-Za-z0-9\s<>&]", k) and any(ord(c) > 0x2000 for c in k)
 
 
 @app.route("/admin/emoji/thumb/<cid>")
@@ -1823,10 +1835,17 @@ def admin_emoji_thumb(cid):
 @app.route("/admin/emoji/set", methods=["POST"])
 @admin_required
 def admin_emoji_set():
+    """Set / clear the premium emoji ID of ONE plain emoji (any emoji, not only the fixed list)."""
     d = request.get_json(silent=True) or {}
-    role, cid = str(d.get("role") or ""), str(d.get("cid") or "")
-    if role not in [e for e, _ in EMOJI_ROLES] or (cid and not re.fullmatch(r"\d{5,25}", cid)):
-        return jsonify(ok=False), 400
+    role, cid = str(d.get("role") or "").strip(), re.sub(r"\D", "", str(d.get("cid") or ""))
+    if not valid_emoji_key(role) or (cid and not re.fullmatch(r"\d{5,25}", cid)):
+        return jsonify(ok=False, msg="Wrong emoji or ID (the ID is only digits, e.g. 5368324170671202286)"), 400
+    found = None
+    if cid:
+        try:                                    # ask Telegram if this ID really exists (so a typo is caught at once)
+            found = bool(bot.lookup(cid))
+        except Exception:
+            found = None                        # Telegram not reachable now: still save it
     m = emoji_overrides()
     if cid:
         m[role] = cid
@@ -1834,7 +1853,24 @@ def admin_emoji_set():
         m.pop(role, None)
     set_setting("emoji_map", json.dumps(m))
     bot.refresh_map()
-    return jsonify(ok=True, cid=cid or bot.emap.get(role.replace("\ufe0f", ""), ""))
+    return jsonify(ok=True, cid=cid or bot.emap.get(role.replace("\ufe0f", ""), ""), found=found)
+
+
+@app.route("/admin/emoji/bulk", methods=["POST"])
+@admin_required
+def admin_emoji_bulk():
+    """Paste many lines like  '✅ 5368324170671202286'  (exactly what the bot's /emojis reply gives)."""
+    txt = str((request.get_json(silent=True) or {}).get("text") or "")
+    m, n = emoji_overrides(), 0
+    for line in txt.splitlines():
+        mm = re.match(r"^\s*(\S{1,12}?)\s*[:=>\-\u2192]*\s*(\d{5,25})\s*$", line)
+        if mm and valid_emoji_key(mm.group(1)):
+            m[mm.group(1)] = mm.group(2)
+            n += 1
+    if n:
+        set_setting("emoji_map", json.dumps(m))
+        bot.refresh_map()
+    return jsonify(ok=bool(n), n=n)
 
 
 @app.route("/admin/devices", methods=["GET", "POST"])

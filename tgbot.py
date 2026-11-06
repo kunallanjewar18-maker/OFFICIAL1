@@ -267,7 +267,7 @@ class Bot:
         """Picture of one custom emoji (for the admin picker). -> (bytes, content_type) or None."""
         if cid in self._thumbs:
             return self._thumbs[cid]
-        sk = self._byid.get(cid)
+        sk = self._byid.get(cid) or self.lookup(cid)
         if not sk or not sk.get("fid"):
             return None
         f = self.api("getFile", _timeout=10, file_id=sk["fid"])
@@ -281,6 +281,20 @@ class Bot:
             self._thumbs.clear()
         self._thumbs[cid] = (r.content, ct)
         return self._thumbs[cid]
+
+    def lookup(self, cid):
+        """Any custom emoji id (even from a pack that is not in EMOJI_PACKS) -> {"id","emoji","fid"} or None."""
+        if cid in self._byid:
+            return self._byid[cid]
+        res = self.api("getCustomEmojiStickers", _timeout=10, custom_emoji_ids=[cid])
+        for sk in res or []:
+            if str(sk.get("custom_emoji_id")) == cid:
+                animated = sk.get("is_animated") or sk.get("is_video")
+                fid = (sk.get("thumbnail") or sk.get("thumb") or {}).get("file_id") or (None if animated else sk.get("file_id"))
+                info = {"id": cid, "emoji": sk.get("emoji") or "", "fid": fid}
+                self._byid[cid] = info
+                return info
+        return None
 
     def fetch_pack(self, name):
         """Download one emoji pack from Telegram -> {plain emoji: custom_emoji_id}."""

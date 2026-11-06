@@ -117,3 +117,11 @@ BOT TOKEN IS NO LONGER IN THE CODE: app.py has no token any more, so a GitHub le
 PREMIUM EMOJI: if a pack has no twin for an emoji, the closest one is used (e.g. money bag -> dollar note).
   Admin > Telegram > Premium emoji picker: tap a normal emoji, tap the premium one you like -> used in ALL messages at once.
   "Send sample purchase alert" shows the result in your Telegram. Approve/Reject button text also gets the premium icon.
+
+---- v10.8 (emoji ID manager) ----
+Admin > Telegram > "Emoji ID manager": every emoji the bot uses has its own ID box. Paste a premium emoji ID -> Save -> used in ALL messages at once
+  (text + button icons). Empty the box + Save = back to automatic. A small preview shows the emoji; Telegram is asked if the ID exists (typo warning).
+ADD ANY EMOJI: type any normal emoji + its premium ID -> Add. Works for every emoji that appears in a bot message. Remove button to delete it.
+PASTE MANY: one line per emoji ("<emoji> <ID>"), exactly like the bot's /emojis / premium-emoji reply -> Apply all.
+GET AN ID: as admin, send any premium emoji (or a t.me/addemoji/... link) to the bot -> it replies with the ID of every emoji.
+  IDs from ANY pack work now (they do not have to be in EMOJI_PACKS). Choices are saved in the backup (settings).
