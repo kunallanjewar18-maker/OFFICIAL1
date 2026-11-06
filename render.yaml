@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: reseller-panel
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 1 --threads 32 --timeout 120 --bind 0.0.0.0:$PORT
+    healthCheckPath: /health
+    envVars:
+      - key: ADMIN_USER
+        sync: false
+      - key: ADMIN_PASS
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: TG_BOT_TOKEN
+        sync: false
+      - key: ADMIN_TG_ID
+        sync: false
