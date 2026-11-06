@@ -47,6 +47,49 @@ def _post(url, payload, connect, read):
     raise TimeoutError("no answer from Telegram")
 
 
+def _get(url, connect, read):
+    """requests.get with a HARD deadline (same idea as _post)."""
+    box = {}
+
+    def work():
+        try:
+            box["r"] = requests.get(url, timeout=(connect, read))
+        except Exception as ex:
+            box["e"] = ex
+    t = threading.Thread(target=work, daemon=True, name="tg-http-get")
+    t.start()
+    t.join(connect + read + 3)
+    if "r" in box:
+        return box["r"]
+    if "e" in box:
+        raise box["e"]
+    raise TimeoutError("no answer from Telegram")
+
+
+# If a pack has no premium twin for an emoji, borrow the closest one (first match in the list wins).
+FALLBACK = {
+    "\u2705": ["\u2714", "\u2611", "\U0001F7E2", "\U0001F44D", "\U0001F197", "\u2B50"],
+    "\u274C": ["\u26D4", "\U0001F6AB", "\u2716", "\U0001F534", "\u26A0", "\U0001F6A8"],
+    "\U0001F6AB": ["\u26D4", "\u274C", "\U0001F6D1", "\U0001F534"],
+    "\U0001F6D2": ["\U0001F6CD", "\U0001F4E6", "\U0001F381", "\U0001F4B3"],
+    "\U0001F4B0": ["\U0001F4B5", "\U0001F4B8", "\U0001F4B2", "\U0001FA99", "\U0001F911", "\U0001F48E", "\U0001F4B3"],
+    "\U0001F4B8": ["\U0001F4B5", "\U0001F4B0", "\U0001F4B2", "\U0001FA99", "\U0001F911", "\U0001F4B3"],
+    "\U0001F4B5": ["\U0001F4B0", "\U0001F4B8", "\U0001F4B2", "\U0001FA99", "\U0001F911"],
+    "\U0001F4B3": ["\U0001F4B0", "\U0001F4B5", "\U0001F4B2", "\U0001F4B8"],
+    "\u23F1": ["\u23F0", "\u231B", "\u23F3", "\U0001F552", "\U0001F551", "\U0001F570"],
+    "\U0001F552": ["\u23F0", "\u23F1", "\u231B", "\U0001F551", "\U0001F550", "\u23F3", "\U0001F570"],
+    "\U0001F511": ["\U0001F5DD", "\U0001F510", "\U0001F512", "\U0001F513", "\U0001F6E1"],
+    "\U0001F510": ["\U0001F512", "\U0001F511", "\U0001F5DD", "\U0001F6E1"],
+    "\U0001F513": ["\U0001F511", "\U0001F5DD", "\U0001F510", "\U0001F512"],
+    "\U0001F464": ["\U0001F9D1", "\U0001F468", "\U0001F468\u200D\U0001F4BB", "\U0001F60E", "\U0001F642", "\U0001F451", "\U0001F465"],
+    "\U0001F4F1": ["\U0001F4F2", "\U0001F4BB", "\U0001F5A5", "\u2328"],
+    "\U0001F310": ["\U0001F30D", "\U0001F30E", "\U0001F4E1", "\U0001F517"],
+    "\U0001F514": ["\U0001F4E2", "\U0001F4E3", "\U0001F6A8", "\u26A1", "\U0001F525"],
+    "\U0001F6A8": ["\U0001F514", "\u26A0", "\U0001F4E2", "\u203C"],
+    "\U0001F44B": ["\U0001F917", "\U0001F44F", "\U0001F44D", "\U0001F60E", "\u2B50"],
+}
+
+
 def nice_error(err):
     """Turn a raw Telegram error into a sentence the admin can act on."""
     e = str(err or "")
@@ -73,7 +116,7 @@ def _norm(e):
 
 class Bot:
     def __init__(self, get_token, get_admin, on_device, brand="RG CHEAT", on_claim=None, on_seen=None,
-                 packs=None, prem_on=None):
+                 packs=None, prem_on=None, get_overrides=None):
         self.get_token = get_token          # () -> bot token (str)
         self.get_admin = get_admin          # () -> admin chat id (str)
         self.on_device = on_device          # (device_row_id:int, approve:bool) -> text
@@ -102,6 +145,14 @@ class Bot:
         self._mode = "both"                         # both | text | btn | plain  (what Telegram accepted last)
         self._mode_ts = 0
         self.prem_err = ""
+        self.get_overrides = get_overrides or (lambda: {})   # admin-picked {plain emoji: custom_emoji_id} (wins over auto)
+        self.stk = {}                               # pack -> [{"id","emoji","fid","kind"}]  (for the picker)
+        self._byid = {}                             # custom_emoji_id -> sticker info
+        self._thumbs = {}
+        self._offset = 0
+        self._tok_seen = None
+        self._loader = None
+        self._wake = threading.Event()
 
     def _note(self, ok, chat_id, what, err=""):
         self.log.appendleft((int(time.time()), ok, str(chat_id), what, err))
@@ -113,8 +164,8 @@ class Bot:
             self.sent_fail += 1
 
     # ------------------------------------------------------------ low level
-    def api(self, method, _timeout=20, **params):
-        tok = self.get_token()
+    def api(self, method, _timeout=20, _tok=None, **params):
+        tok = _tok or self.get_token()
         if not tok:
             raise RuntimeError("bot token not set")
         try:
@@ -153,6 +204,22 @@ class Bot:
             threading.Thread(target=self._refresh_me, daemon=True, name="tg-me").start()
         return self._me
 
+    def check_token(self, tok):
+        """Ask Telegram if this token is valid, WITHOUT saving it. -> (ok, bot_info_or_error_text)."""
+        try:
+            return True, self.api("getMe", _timeout=10, _tok=tok)
+        except Exception as e:
+            return False, nice_error(e)
+
+    def token_changed(self):
+        """Call after the token was saved / removed: the bot switches to it at once (no redeploy)."""
+        self._me, self._me_ts, self.me_err, self.poll_err = None, 0, "", ""
+        self._hook_cleared = None
+        self._offset = 0
+        self.pack_info, self.pack_data = {}, {}
+        self._rebuild_map()
+        self.reload_packs()
+
     def me(self):
         try:
             return self.api("getMe", _timeout=10)
@@ -165,6 +232,19 @@ class Bot:
         for name in self.packs:                     # earlier pack in the list has priority
             for k, v in (self.pack_data.get(name) or {}).items():
                 m.setdefault(k, v)
+        for role, alts in FALLBACK.items():         # no exact twin in the packs -> borrow the closest emoji
+            role = _norm(role)
+            if role not in m:
+                for a in alts:
+                    if _norm(a) in m:
+                        m[role] = m[_norm(a)]
+                        break
+        try:                                        # emoji picked by the admin (Admin > Telegram) always win
+            for k, v in (self.get_overrides() or {}).items():
+                if k and v:
+                    m[_norm(k)] = str(v)
+        except Exception:
+            pass
         self.emap = m
         if m:
             keys = sorted(m, key=len, reverse=True)
@@ -172,20 +252,57 @@ class Bot:
         else:
             self._rx = None
 
+    def refresh_map(self):
+        self._rebuild_map()
+
+    def catalog(self):
+        """Every emoji of every pack, for the picker: [(pack, index, custom_emoji_id, base emoji)]."""
+        out = []
+        for name in self.packs:
+            for i, sk in enumerate(self.stk.get(name) or []):
+                out.append((name, i + 1, sk["id"], sk["emoji"]))
+        return out
+
+    def thumb(self, cid):
+        """Picture of one custom emoji (for the admin picker). -> (bytes, content_type) or None."""
+        if cid in self._thumbs:
+            return self._thumbs[cid]
+        sk = self._byid.get(cid)
+        if not sk or not sk.get("fid"):
+            return None
+        f = self.api("getFile", _timeout=10, file_id=sk["fid"])
+        path = (f or {}).get("file_path") or ""
+        r = _get("https://api.telegram.org/file/bot%s/%s" % (self.get_token(), path), 5, 10)
+        ct = {"webp": "image/webp", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}.get(
+            path.rsplit(".", 1)[-1].lower())
+        if r.status_code != 200 or not ct:
+            return None
+        if len(self._thumbs) > 800:
+            self._thumbs.clear()
+        self._thumbs[cid] = (r.content, ct)
+        return self._thumbs[cid]
+
     def fetch_pack(self, name):
         """Download one emoji pack from Telegram -> {plain emoji: custom_emoji_id}."""
         st = self.api("getStickerSet", _timeout=20, name=name)
-        out = {}
+        out, lst = {}, []
         for sk in st.get("stickers") or []:
             cid, em = sk.get("custom_emoji_id"), sk.get("emoji")
             if cid and em:
                 out.setdefault(_norm(em), cid)
+                animated = sk.get("is_animated") or sk.get("is_video")
+                fid = (sk.get("thumbnail") or sk.get("thumb") or {}).get("file_id") or (None if animated else sk.get("file_id"))
+                info = {"id": cid, "emoji": em, "fid": fid}
+                lst.append(info)
+                self._byid[cid] = info
+        self.stk[name] = lst
         return out
 
     def _load_packs(self):
         while True:
             if not self.get_token():
-                time.sleep(10)
+                self._wake.wait(10)
+                self._wake.clear()
                 continue
             todo = [n for n in self.packs if not (self.pack_info.get(n) or {}).get("ok")]
             for name in todo:
@@ -198,7 +315,16 @@ class Bot:
                 self._rebuild_map()
             if not todo or all((self.pack_info.get(n) or {}).get("ok") for n in self.packs):
                 return
-            time.sleep(60)
+            self._wake.wait(60)
+            self._wake.clear()
+
+    def reload_packs(self):
+        if not self.packs:
+            return
+        self._wake.set()
+        if not (self._loader and self._loader.is_alive()):
+            self._loader = threading.Thread(target=self._load_packs, daemon=True, name="tg-emoji")
+            self._loader.start()
 
     def premium(self, text):
         """Replace normal emoji in an HTML message by their premium version (never touches tags / <code>)."""
@@ -316,29 +442,32 @@ class Bot:
 
     # ------------------------------------------------------------ receiving
     def _poller(self):
-        offset = 0
         while True:
             tok = self.get_token()
             if not tok:
-                time.sleep(5)
+                time.sleep(3)
                 continue
             try:
+                if self._tok_seen != tok:              # token was changed in the panel -> start fresh with the new bot
+                    self._tok_seen, self._offset, self._hook_cleared = tok, 0, None
                 if self._hook_cleared != tok:          # polling needs the webhook to be off
                     self.api("deleteWebhook", _timeout=10)
                     self._hook_cleared = tok
-                ups = self.api("getUpdates", _timeout=40, offset=offset, timeout=25,
+                ups = self.api("getUpdates", _timeout=25, offset=self._offset, timeout=8,
                                allowed_updates=["message", "callback_query"]) or []
+                if self.get_token() != tok:            # changed while waiting: drop these updates
+                    continue
                 self.poll_err = ""
                 self.poll_ok = int(time.time())
                 for u in ups:
-                    offset = u["update_id"] + 1
+                    self._offset = u["update_id"] + 1
                     try:
                         self._handle(u)
                     except Exception:
                         pass
             except Exception as e:
                 self.poll_err = nice_error(e)
-                time.sleep(5)
+                time.sleep(3)
 
     def _handle(self, u):
         m = u.get("message")
@@ -389,9 +518,14 @@ class Bot:
             self.api("answerCallbackQuery", callback_query_id=cb["id"], text=res)
             msg = cb.get("message") or {}
             try:
-                self.api("editMessageReplyMarkup", chat_id=msg["chat"]["id"], message_id=msg["message_id"],
-                         reply_markup={"inline_keyboard": [[{"text": ("✅ " if act == "a" else "❌ ") + res,
-                                                             "callback_data": "noop"}]]})
+                label = ("✅ " if act == "a" else "❌ ") + res
+                for icon in (self._cur_mode() in ("both", "btn"), False):
+                    try:
+                        self.api("editMessageReplyMarkup", chat_id=msg["chat"]["id"], message_id=msg["message_id"],
+                                 reply_markup={"inline_keyboard": [[self._btn(label, "noop", icon)]]})
+                        break
+                    except Exception:
+                        continue
             except Exception:
                 pass
 
@@ -447,5 +581,4 @@ class Bot:
             return
         self._started = True
         threading.Thread(target=self._poller, daemon=True, name="tg-poll").start()
-        if self.packs:
-            threading.Thread(target=self._load_packs, daemon=True, name="tg-emoji").start()
+        self.reload_packs()

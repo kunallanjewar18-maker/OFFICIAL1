@@ -780,4 +780,34 @@ mf.addEventListener('submit',function(e){var f=mf.querySelector('input[type=file
  x.ontimeout=x.onerror;x.timeout=600000;x.open('POST','/admin/music');x.send(new FormData(mf))});
 </script>{% endblock %}""", 1)
 
+# ---- v10.7: change the bot token from the panel + premium emoji picker
+T["admin_telegram.html"] = T["admin_telegram.html"].replace(
+ """<p class=mu>Bot token (from @BotFather){% if has_token %} &mdash; saved (ends with <code>{{tail}}</code>). Leave empty to keep it.{% endif %}{% if env_tok %} <b>(set inside app.py / env, it wins)</b>{% endif %}</p>""",
+ """<p class=mu>Bot token (from @BotFather){% if has_token %} &mdash; saved (ends with <code>{{tail}}</code>){% if tok_src=='env' %}, from the Render env variable{% endif %}. Leave empty to keep it.{% endif %}<br>Paste a NEW token here and press Save: it is checked with Telegram and the bot switches to it <b>at once</b> (no redeploy, no code change).</p>""", 1)
+T["admin_telegram.html"] = T["admin_telegram.html"].replace(
+ """{% if env_adm %} <b>(set inside app.py / env, it wins)</b>{% endif %}""", "", 1)
+T["admin_telegram.html"] = T["admin_telegram.html"].replace(
+ """<div class=card><h3>Test</h3>""",
+ """{% if has_token and tok_src=='panel' %}<div class=card><h3>Token leaked?</h3><p class=hint>1) In @BotFather send <code>/revoke</code> and get the new token. 2) Paste it above and Save. The old token stops working immediately, the website stays online.</p>
+<form method=post onsubmit="return confirm('Remove the bot token? The bot goes OFF until you paste a new one.')"><input type=hidden name=action value=clear_token><button class=r>Remove token</button></form></div>{% endif %}
+<div class=card><h3>Test</h3>""", 1)
+T["admin_telegram.html"] = T["admin_telegram.html"].replace(
+ """<p class=hint>Open your bot in Telegram and press Start first""",
+ """<form method=post style="margin-top:8px"><input type=hidden name=action value=test_alert><button>{{ic('send')}} Send sample purchase alert (to see the emoji)</button></form>
+<p class=hint>Open your bot in Telegram and press Start first""", 1)
+T["admin_telegram.html"] = T["admin_telegram.html"].replace(
+ """<div class=card><h3>Test</h3>""",
+ """<div class=card><h3>Premium emoji picker</h3>
+<p class=hint>Each normal emoji the bot uses is shown with the premium emoji it will become. Tap a row, then tap the emoji you like from your packs below. It is used in every message at once. {% if n_over %}({{n_over}} chosen by you){% endif %}</p>
+<div id=erole style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0">{% for r in roles %}<button type=button class=erole data-r="{{r.em}}" title="{{r.label}}" style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:12px;color:inherit"><span style="font-size:20px">{{r.em}}</span><span>&rarr;</span>{% if r.cid %}<img class=ep src="/admin/emoji/thumb/{{r.cid}}" width=26 height=26 alt="">{% else %}<img class=ep width=26 height=26 alt="" style="display:none"><span class=eno class=mu>none</span>{% endif %}</button>{% endfor %}</div>
+<div id=ehint class=mu style="margin-bottom:8px">Tap the emoji you want to replace first.</div>
+<details><summary style="cursor:pointer"><b>Open my emoji packs</b> ({{cat|length}} emoji)</summary>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:6px;margin-top:10px">{% for pk,ix,cid,em in cat %}<button type=button class=ecell data-c="{{cid}}" title="{{pk}} #{{ix}}" style="padding:4px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px"><img loading=lazy src="/admin/emoji/thumb/{{cid}}" width=40 height=40 alt="{{em}}"></button>{% else %}<div class=mu>Packs not loaded yet (bot token must work). Reload in a few seconds.</div>{% endfor %}</div></details>
+<form method=post style="margin-top:10px" onsubmit="return confirm('Back to automatic emoji?')"><input type=hidden name=action value=reset_emoji><button class=r>Reset to automatic</button></form>
+<script>(function(){var cur=null,hint=document.getElementById('ehint');
+function post(role,cid,btn){fetch('/admin/emoji/set',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:role,cid:cid})}).then(function(r){return r.json()}).then(function(j){if(!j.ok)return;var im=btn.querySelector('.ep'),no=btn.querySelector('.eno');if(j.cid){im.src='/admin/emoji/thumb/'+j.cid;im.style.display='';if(no)no.style.display='none'}hint.textContent='Saved. Next messages use it.'}).catch(function(){hint.textContent='Could not save, try again'})}
+document.querySelectorAll('.erole').forEach(function(b){b.addEventListener('click',function(){document.querySelectorAll('.erole').forEach(function(x){x.style.outline=''});cur=b;b.style.outline='2px solid var(--ac,#4f8cff)';hint.textContent='Now tap an emoji from the packs below for '+b.dataset.r})});
+document.querySelectorAll('.ecell').forEach(function(c){c.addEventListener('click',function(){if(!cur){hint.textContent='First tap the emoji you want to replace (top row).';return}post(cur.dataset.r,c.dataset.c,cur)})})})();</script></div>
+<div class=card><h3>Test</h3>""", 1)
+
 TEMPLATES = T

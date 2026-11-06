@@ -18,8 +18,8 @@ ADMIN_PASS = "909090"
 TZ_OFFSET = int(os.environ.get("TZ_OFFSET_MIN", "330")) * 60  # default IST
 MAX_MUSIC = 20
 # ---- TELEGRAM BOT (edit here, nothing else to configure) ----------------------------------------
-TG_BOT_TOKEN = "8702718197:AAFAq1-H6uxcDZaUfFwWLdIYLFj-tq3IsnI"   # token from @BotFather (keep the GitHub repo PRIVATE; Render env TG_BOT_TOKEN overrides this)
-TG_ADMIN_ID = "6739795427"      # optional: your own Telegram Chat ID. Leave empty -> open the bot and send:  /admin 909090
+TG_BOT_TOKEN = ""   # NEVER write the bot token here (GitHub leak!). Set it in Admin > Telegram. Optional backup: Render env TG_BOT_TOKEN
+TG_ADMIN_ID = "6739795427"      # default admin Chat ID (not secret). Admin > Telegram can change it any time
 EMOJI_PACKS = [x for x in (os.environ.get("EMOJI_PACKS") or "RGCHEAT99,botd3,NewsEmoji").replace(" ", "").split(",") if x]   # premium emoji packs (first = highest priority)
 BRAND = "RG CHEAT"      # name shown on login + panel header
 CURRENCY = "₹"         # symbol shown before money amounts (all prices are INR)
@@ -555,11 +555,37 @@ def num(v, default=0.0):
 
 # ---------------------------------------------------------------- telegram + security helpers
 def tg_token():
-    return (os.environ.get("TG_BOT_TOKEN") or TG_BOT_TOKEN or get_setting("tg_token")).strip()
+    """Panel (Admin > Telegram) wins. Render env var TG_BOT_TOKEN is only the fallback (e.g. after a free-disk wipe)."""
+    return (get_setting("tg_token") or os.environ.get("TG_BOT_TOKEN") or TG_BOT_TOKEN or "").strip()
+
+
+def tg_token_source():
+    if get_setting("tg_token"):
+        return "panel"
+    return "env" if (os.environ.get("TG_BOT_TOKEN") or TG_BOT_TOKEN) else ""
 
 
 def tg_admin():
-    return str(os.environ.get("ADMIN_TG_ID") or TG_ADMIN_ID or get_setting("tg_admin")).strip()
+    return str(get_setting("tg_admin") or os.environ.get("ADMIN_TG_ID") or TG_ADMIN_ID or "").strip()
+
+
+def emoji_overrides():
+    """{plain emoji: custom_emoji_id} picked in Admin > Telegram > Premium emoji picker."""
+    try:
+        d = json.loads(get_setting("emoji_map", "{}") or "{}")
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+# every emoji the bot uses in its messages (the picker lets you choose a premium emoji for each one)
+EMOJI_ROLES = [("\u2705", "Done / Product"), ("\u274C", "Reject / Error"), ("\U0001F6D2", "Quantity"),
+               ("\U0001F4B0", "Balance"), ("\U0001F4B8", "Paid / Amount"),
+               ("\u23F1", "Validity"), ("\U0001F552", "Time"), ("\U0001F6AB", "Paid by / Warning"),
+               ("\U0001F511", "Key"), ("\U0001F464", "Reseller"), ("\U0001F4F1", "Device"),
+               ("\U0001F310", "IP"), ("\U0001F514", "Notification"), ("\U0001F513", "Login"),
+               ("\U0001F510", "Login code"), ("\U0001F6A8", "Low balance"), ("\U0001F4B3", "Method"),
+               ("\U0001F44B", "Welcome")]
 
 
 _CLAIMS = []
@@ -617,7 +643,7 @@ def mask_id(tc):
 
 
 bot = tgbot.Bot(tg_token, tg_admin, device_decision, BRAND, claim_admin, tg_seen,
-                packs=EMOJI_PACKS, prem_on=lambda: get_setting("prem_on", "1") == "1")
+                packs=EMOJI_PACKS, prem_on=lambda: get_setting("prem_on", "1") == "1", get_overrides=emoji_overrides)
 
 
 def ua_label(ua):
@@ -1708,19 +1734,43 @@ def admin_telegram():
         if a == "save":
             tok = f.get("token", "").strip()
             adm_id = f.get("admin_id", "").strip()
+            if adm_id and not re.fullmatch(r"-?\d{5,15}", adm_id):
+                flash("Admin Chat ID must be numbers only", "err")
+                return redirect("/admin/telegram")
             if tok:
                 if not re.fullmatch(r"\d{6,12}:[\w-]{30,60}", tok):
                     flash("That does not look like a bot token (from @BotFather)", "err")
                     return redirect("/admin/telegram")
-                set_setting("tg_token", tok)
-            if adm_id and not re.fullmatch(r"-?\d{5,15}", adm_id):
-                flash("Admin Chat ID must be numbers only", "err")
-                return redirect("/admin/telegram")
+                ok, info = bot.check_token(tok)            # ask Telegram BEFORE saving
+                if not ok and ("unauthorized" in info.lower() or "not found" in info.lower()):
+                    flash("Telegram rejected this token - not saved. (%s)" % info, "err")
+                    return redirect("/admin/telegram")
+                if tok != tg_token():
+                    set_setting("tg_token", tok)
+                    bot.token_changed()                    # the bot switches to the new token right now
+                if ok:
+                    flash("New token saved - @%s is running now. No redeploy needed." % info.get("username", "bot"), "ok")
+                else:
+                    flash("Token saved, but Telegram could not be reached to check it (%s)." % info, "err")
             set_setting("tg_admin", adm_id)
             set_setting("dev_check", "1" if f.get("dev_check") else "0")
             set_setting("otp_global", "1" if f.get("otp_global") else "0")
             set_setting("prem_on", "1" if f.get("prem_on") else "0")
-            flash("Telegram settings saved", "ok")
+            if not tok:
+                flash("Telegram settings saved", "ok")
+        elif a == "clear_token":
+            set_setting("tg_token", "")
+            bot.token_changed()
+            flash("Bot token removed. The bot is OFF until you paste a new token." if not tg_token()
+                  else "Panel token removed. Now using the Render env TG_BOT_TOKEN.", "ok")
+        elif a == "reset_emoji":
+            set_setting("emoji_map", "{}")
+            bot.refresh_map()
+            flash("Emoji choices reset to automatic", "ok")
+        elif a == "test_alert":
+            ok, err = send_bounded(tg_admin(), purchase_text("SAMPLE PRODUCT", 1, 20, 824.44, "5456242 : 49892697",
+                                                             "panel", buyer="RPSHIVA"), what="sample alert")
+            flash("Sample alert sent to your Telegram" if ok else "Could not send: %s" % err, "ok" if ok else "err")
         elif a == "test":
             ok, err = send_bounded(tg_admin(), "\u2705 <b>%s</b>\nTest message - the bot is connected." % esc(BRAND),
                                    what="admin test")
@@ -1740,8 +1790,51 @@ def admin_telegram():
                            admin_id=tg_admin(), dev_check=get_setting("dev_check", "1") == "1",
                            otp_global=otp_global_on(), rs=rs, log=list(bot.log), poll_err=bot.poll_err, me_err=bot.me_err,
                            sent_ok=bot.sent_ok, sent_fail=bot.sent_fail, seen=seen_unlinked(),
-                           env_tok=bool(os.environ.get("TG_BOT_TOKEN") or TG_BOT_TOKEN), env_adm=bool(os.environ.get("ADMIN_TG_ID") or TG_ADMIN_ID),
+                           tok_src=tg_token_source(), roles=emoji_roles(),
+                           cat=bot.catalog(), n_over=len(emoji_overrides()),
                            active=dev_check_on(), prem_on=get_setting("prem_on", "1") == "1", prem=bot.status(), page="telegram")
+
+
+def emoji_roles():
+    ov, out = emoji_overrides(), []
+    for em, label in EMOJI_ROLES:
+        cid = ov.get(em) or bot.emap.get(em.replace("\ufe0f", "")) or ""
+        out.append(dict(em=em, label=label, cid=cid, manual=bool(ov.get(em))))
+    return out
+
+
+@app.route("/admin/emoji/thumb/<cid>")
+@admin_required
+def admin_emoji_thumb(cid):
+    if not re.fullmatch(r"\d{5,25}", cid):
+        abort(404)
+    try:
+        t = bot.thumb(cid)
+    except Exception:
+        t = None
+    if not t:
+        abort(404)
+    resp = make_response(t[0])
+    resp.headers["Content-Type"] = t[1]
+    resp.headers["Cache-Control"] = "private, max-age=86400"
+    return resp
+
+
+@app.route("/admin/emoji/set", methods=["POST"])
+@admin_required
+def admin_emoji_set():
+    d = request.get_json(silent=True) or {}
+    role, cid = str(d.get("role") or ""), str(d.get("cid") or "")
+    if role not in [e for e, _ in EMOJI_ROLES] or (cid and not re.fullmatch(r"\d{5,25}", cid)):
+        return jsonify(ok=False), 400
+    m = emoji_overrides()
+    if cid:
+        m[role] = cid
+    else:
+        m.pop(role, None)
+    set_setting("emoji_map", json.dumps(m))
+    bot.refresh_map()
+    return jsonify(ok=True, cid=cid or bot.emap.get(role.replace("\ufe0f", ""), ""))
 
 
 @app.route("/admin/devices", methods=["GET", "POST"])

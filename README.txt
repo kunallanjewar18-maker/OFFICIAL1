@@ -34,7 +34,7 @@ MUSIC: after reopening, the same song restarts from its beginning; backup now in
 
 ---- v6 ----
 TELEGRAM BOT (runs inside the website - tgbot.py, no separate hosting)
-  1. The bot token is already inside app.py (TG_BOT_TOKEN at the top). Keep the GitHub repo PRIVATE.
+  1. The bot token is set in Admin > Telegram (never in the code).
   2. Open your bot in Telegram and send:  /admin 909090   (your admin password) -> you become the admin. Nothing else to set.
   3. Reseller opens the bot, presses Start, sends you his Chat ID -> Admin > Resellers (create form or Manage).
 LOGIN: username + password -> (new device: admin gets Accept/Reject in Telegram) -> 6-digit code in Telegram -> dashboard.
@@ -99,7 +99,7 @@ ADMIN PURCHASE ALERT: every purchase (panel + API) sends the admin the same NEW 
   "Bought by: <reseller name>" and "Reseller Current Balance". Admin copy is sent even if the reseller has no Chat ID or alerts OFF.
 
 ---- v10.5 ----
-BOT TOKEN: new token is set in app.py (TG_BOT_TOKEN). Keep the GitHub repo PRIVATE. A Render env var TG_BOT_TOKEN overrides it.
+BOT TOKEN: set in Admin > Telegram (see v10.7).
   (If /start shows another channel's "must join" message, the same token is running somewhere else - revoking the token stops that copy.)
 BALANCE ADDED: every top-up (auto UPI or Admin > Reseller > add balance) sends YOU: reseller name, amount added, current balance, method, time.
   The reseller also gets "BALANCE ADDED" (if his alerts are on).
@@ -107,3 +107,13 @@ PREMIUM EMOJI: packs RGCHEAT99, botd3, NewsEmoji (change with env EMOJI_PACKS=a,
   Every normal emoji in bot messages becomes its premium twin automatically; inline buttons get premium icons.
   If Telegram refuses (text emoji need a Fragment username on the bot), the bot falls back to normal emoji by itself - nothing is lost.
   Admin > Telegram > Premium emoji shows status + on/off switch. In the bot (as admin): /emojis = status; send premium emojis or a t.me/addemoji link = get IDs.
+
+---- v10.7 ----
+BOT TOKEN IS NO LONGER IN THE CODE: app.py has no token any more, so a GitHub leak cannot expose it.
+  Admin > Telegram > paste token > Save. It is checked with Telegram first, then the bot switches to it at once (no redeploy).
+  Token leaked? @BotFather /revoke -> paste the new token in Admin > Telegram. Website stays online.
+  Priority: token saved in the panel > Render env TG_BOT_TOKEN (optional fallback). The token is part of the normal Backup (settings).
+  NOTE: Render free disk is wiped on redeploy -> restore the backup, or set env TG_BOT_TOKEN once as a safety net.
+PREMIUM EMOJI: if a pack has no twin for an emoji, the closest one is used (e.g. money bag -> dollar note).
+  Admin > Telegram > Premium emoji picker: tap a normal emoji, tap the premium one you like -> used in ALL messages at once.
+  "Send sample purchase alert" shows the result in your Telegram. Approve/Reject button text also gets the premium icon.
