@@ -133,7 +133,7 @@ RESELLER: left three-line menu > "Bot Make" (above Security). Fill 3 boxes: Bot 
 ADMIN: three-line menu > "Bots": see every reseller bot (name, @username, reseller, admin ID, Running/Stopped), Stop / Start / Restart / Delete,
   Log (last lines of the bot's output), Database download, "Add / restore database" (upload .db or .zip - old DB is kept as safety copy, bot restarts),
   Max bots limit, "Backup all bots (.zip)" + Restore (Render free disk is wiped on redeploy - restore brings every bot and its database back).
-FILES: bot_template/main.py = the bot code (copied into every created bot on each start). To update ALL bots: replace this file and redeploy.
+FILES: bot_main.py = the bot code (next to app.py - do NOT put it in a folder) (copied into every created bot on each start). To update ALL bots: replace this file and redeploy.
   Each bot lives in data/bot_instances/<id>/ with its OWN shop_data.db. A watchdog restarts crashed bots and starts every bot again after the website restarts.
 RENDER: keep  gunicorn app:app --workers 1 --threads 32 ...  (one worker, because it manages the bot processes). Every bot is one extra Python process
   (memory!). On the free 512 MB plan keep "Max bots" small (2-3) or use a paid plan.

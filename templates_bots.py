@@ -25,7 +25,7 @@ RESELLER_PAGE = r"""{% extends 'rbase.html' %}{% block c %}
 <div class=card><div class=hint>Bot creation is full right now. Please contact the admin.</div></div>
 {% else %}
 <div class=card><h3>{{ic('plus',20)}} Create your own bot</h3>
-<div class=mu>Make a bot in <b>@BotFather</b> first, then fill the 3 boxes. Your bot is ready in a few seconds.</div>
+<div class=mu>Make a bot in <b>@BotFather</b> first, then fill the 3 boxes. Your bot starts in about 5-10 seconds.</div>
 <form method=post id=bmf style="margin-top:12px">
 <p class=mu style="margin:14px 0 4px">Bot name <span class=mu>(shown everywhere inside the bot)</span></p>
 <input name=name maxlength=40 required placeholder="e.g. My Cheat Shop" style="width:100%" autocomplete=off>
@@ -41,7 +41,11 @@ RESELLER_PAGE = r"""{% extends 'rbase.html' %}{% block c %}
 {% endblock %}"""
 
 ADMIN_PAGE = r"""{% extends 'abase.html' %}{% block c %}<h2>{{ic('bot',24)}} Reseller Bots</h2>
-{% if not template_ok %}<div class="flash err">bot_template/main.py is missing - upload your bot code there, otherwise no bot can start.</div>{% endif %}
+{% if not template_ok %}<div class="flash err">Bot code is missing - upload your bot's main.py below, otherwise no bot can start.</div>{% endif %}
+<div class=card><h3>Bot code {% if template_ok %}<span class="pill a">Ready</span>{% else %}<span class="pill e">Missing</span>{% endif %}</h3>
+<div class=mu>{% if template_ok %}In use: {{template_info}}. {% endif %}Best: keep <code>bot_main.py</code> next to app.py on GitHub. Or upload main.py here (kept until the next redeploy).</div>
+<form method=post action="/admin/bots/code" enctype=multipart/form-data class=row style="margin-top:10px;gap:8px;flex-wrap:wrap"><input type=file name=file accept=".py" required><button class=g>Save bot code</button></form>
+<form method=post action="/admin/bots/restart-all" style="margin-top:10px" onsubmit="return confirm('Restart every running bot now?')"><button class=o>Restart all bots (apply new code)</button></form></div>
 <div class=card>
 <div class=mu>Every bot also gets your admin ID <code>{{owner or 'not set'}}</code> (set in Admin &gt; Telegram) - it is always an admin and cannot be removed inside the bot.</div>
 <form method=post class=row style="margin-top:10px"><input type=hidden name=action value=max>

@@ -18,7 +18,19 @@ from pathlib import Path
 from flask import request, redirect, render_template, flash, Response, send_file, abort
 
 HERE = Path(__file__).resolve().parent
-TEMPLATE_DIR = HERE / "bot_template"
+
+
+def find_template():
+    """Where is the bot code?  1) uploaded in Admin > Bots  2) bot_main.py next to app.py  3) bot_template/main.py  4) main.py.
+    Returns the main.py path (a main.enc next to it is copied too) or None."""
+    for p in (Path(H["data_dir"]) / "bot_template" / "main.py", HERE / "bot_main.py",
+              HERE / "bot_template" / "main.py", HERE / "main.py"):
+        try:
+            if p.is_file() and p.stat().st_size > 1000:
+                return p
+        except OSError:
+            pass
+    return None
 
 TOKEN_RE = re.compile(r"^\d{6,14}:[A-Za-z0-9_-]{30,60}$")
 DEFAULT_MAX_BOTS = 5
@@ -202,12 +214,12 @@ def _child_env(iid, env_saved):
 
 def _sync_code(iid):
     """Copy the current template code into the bot's folder (so a new main.py reaches every bot on its next start)."""
-    src = TEMPLATE_DIR / "main.py"
-    if not src.exists():
-        raise RuntimeError("bot_template/main.py is missing in the website files")
+    src = find_template()
+    if not src:
+        raise RuntimeError("the bot code (bot_main.py) is not uploaded yet")
     d = inst_dir(iid)
     shutil.copy2(src, d / "main.py")
-    enc = TEMPLATE_DIR / "main.enc"
+    enc = src.with_name("main.enc")
     if enc.exists():
         shutil.copy2(enc, d / "main.enc")
 
@@ -366,12 +378,16 @@ def _watchdog():
 
 
 # ------------------------------------------------------------------ telegram helpers
-def _tg(token, method, payload=None, read=10):
-    try:
-        r = H["tg_post"](token, method, payload or {}, read)
-        return r.json()
-    except Exception as e:
-        return {"ok": False, "description": "Cannot reach Telegram (%s)" % type(e).__name__}
+def _tg(token, method, payload=None, read=10, tries=1):
+    last = None
+    for i in range(tries):
+        try:
+            r = H["tg_post"](token, method, payload or {}, read)
+            return r.json()
+        except Exception as e:
+            last = {"ok": False, "network": True, "description": "Cannot reach Telegram (%s)" % type(e).__name__}
+            time.sleep(0.5)
+    return last
 
 
 def _menu(token, admin_ids):
@@ -399,13 +415,17 @@ def create_bot(reseller, name, token, admin_id):
         return False, "Admin ID must be a Telegram numeric ID (digits only)."
     if row_for_reseller(reseller["id"]):
         return False, "You already have a bot. Ask the admin if you need a new one."
+    if not find_template():
+        return False, "Bot creation is not ready yet (admin has not uploaded the bot code). Please tell the admin."
     if len(rows()) >= get_max():
         return False, "Bot limit reached. Please contact the admin."
     h = hashlib.sha256(token.encode()).hexdigest()
     if H["q"]("SELECT 1 FROM reseller_bots WHERE token_hash=?", (h,), one=True) or token == (H["site_token"]() or ""):
         return False, "This bot token is already in use. Make a new bot in @BotFather and use its token."
-    me = _tg(token, "getMe")
+    me = _tg(token, "getMe", read=12, tries=3)
     if not me.get("ok"):
+        if me.get("network"):
+            return False, "Telegram is slow to answer right now. Nothing was created - please press CREATE BOT again."
         why = str(me.get("description") or "unknown error")
         return False, "Telegram refused this token: %s" % ("token is wrong or revoked" if "nauthorized" in why else why)
     username = (me.get("result") or {}).get("username") or ""
@@ -625,7 +645,45 @@ def setup(app, **helpers):
         rs = rows()
         return render_template("admin_bots.html", rows=rs, states={r["instance_id"]: state_of(r) for r in rs},
                                maxb=get_max(), owner=_owner_id(), page="bots",
-                               template_ok=(TEMPLATE_DIR / "main.py").exists())
+                               template_ok=bool(find_template()),
+                               template_info=(("%s (%d KB)" % (find_template().name if find_template().parent == HERE else
+                                                              "uploaded code", find_template().stat().st_size // 1024))
+                                              if find_template() else ""))
+
+    @app.route("/admin/bots/code", methods=["POST"])
+    @admin_required
+    def admin_bots_code():
+        f = request.files.get("file")
+        data = f.read() if f and f.filename else b""
+        try:
+            if len(data) < 1000:
+                raise ValueError("Choose your bot's main.py file.")
+            compile(data.decode("utf-8"), "main.py", "exec")
+        except (SyntaxError, UnicodeDecodeError, ValueError) as e:
+            flash("Bot code not saved: %s" % e, "err")
+            return redirect("/admin/bots")
+        d = Path(H["data_dir"]) / "bot_template"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "main.py").write_bytes(data)
+        flash("Bot code saved. New bots use it now; press 'Restart all bots' to update the running ones.", "ok")
+        return redirect("/admin/bots")
+
+    @app.route("/admin/bots/restart-all", methods=["POST"])
+    @admin_required
+    def admin_bots_restart_all():
+        ids = [r["instance_id"] for r in rows() if r["desired"] == "running"]
+
+        def work():
+            for iid in ids:
+                try:
+                    stop(iid)
+                    _gave_up.discard(iid)
+                    spawn(iid, wait=25)
+                except Exception as e:
+                    print("[botmake] restart-all %s: %s" % (iid, e), flush=True)
+        threading.Thread(target=work, daemon=True).start()
+        flash("Restarting %d bot(s) one by one with the current bot code." % len(ids), "ok")
+        return redirect("/admin/bots")
 
     @app.route("/admin/bots/<iid>/<action>", methods=["POST"])
     @admin_required
