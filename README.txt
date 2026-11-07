@@ -125,3 +125,15 @@ ADD ANY EMOJI: type any normal emoji + its premium ID -> Add. Works for every em
 PASTE MANY: one line per emoji ("<emoji> <ID>"), exactly like the bot's /emojis / premium-emoji reply -> Apply all.
 GET AN ID: as admin, send any premium emoji (or a t.me/addemoji/... link) to the bot -> it replies with the ID of every emoji.
   IDs from ANY pack work now (they do not have to be in EMOJI_PACKS). Choices are saved in the backup (settings).
+
+---- v10.11 (BOT MAKE) ----
+RESELLER: left three-line menu > "Bot Make" (above Security). Fill 3 boxes: Bot name, Bot API token (@BotFather), Admin ID -> the bot is created and started at once.
+  The bot name is used everywhere inside the bot, the token is linked, the typed Admin ID becomes the bot's admin. Your own admin ID
+  (Admin > Telegram > admin Chat ID) is ALWAYS added too and cannot be removed inside the bot. One bot per reseller.
+ADMIN: three-line menu > "Bots": see every reseller bot (name, @username, reseller, admin ID, Running/Stopped), Stop / Start / Restart / Delete,
+  Log (last lines of the bot's output), Database download, "Add / restore database" (upload .db or .zip - old DB is kept as safety copy, bot restarts),
+  Max bots limit, "Backup all bots (.zip)" + Restore (Render free disk is wiped on redeploy - restore brings every bot and its database back).
+FILES: bot_template/main.py = the bot code (copied into every created bot on each start). To update ALL bots: replace this file and redeploy.
+  Each bot lives in data/bot_instances/<id>/ with its OWN shop_data.db. A watchdog restarts crashed bots and starts every bot again after the website restarts.
+RENDER: keep  gunicorn app:app --workers 1 --threads 32 ...  (one worker, because it manages the bot processes). Every bot is one extra Python process
+  (memory!). On the free 512 MB plan keep "Max bots" small (2-3) or use a paid plan.

@@ -835,6 +835,10 @@ document.getElementById('ebulkb').addEventListener('click',function(){var m=docu
 document.querySelectorAll('.ecell').forEach(function(c){c.addEventListener('click',function(){if(!last){alert('First tap an ID box above, then tap the emoji.');return}last.value=c.dataset.c;last.focus()})})})();</script></div>
 <div class=card><h3>Test</h3>""", 1)
 
+# ---- v10.11: Bot Make (reseller) + Bots (admin)
+from templates_bots import install as _install_bots
+_install_bots(T, _P)
+
 TEMPLATES = T
 
 

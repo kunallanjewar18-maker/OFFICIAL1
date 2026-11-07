@@ -2257,5 +2257,20 @@ from templates_ui2 import TEMPLATES, ic  # noqa: E402
 app.jinja_env.globals["ic"] = ic
 app.jinja_env.loader = DictLoader(TEMPLATES)
 
+# ---- v10.11: BOT MAKE (resellers create their own bot from the website) -> botmake.py
+import botmake  # noqa: E402
+
+
+def _bm_notify_admin(text):
+    if tg_admin():
+        bot.send(tg_admin(), text, what="new reseller bot")
+
+
+botmake.setup(app, data_dir=DATA_DIR, q=q, get_setting=get_setting, set_setting=set_setting,
+              reseller_required=reseller_required, admin_required=admin_required,
+              owner_admin=tg_admin, site_token=tg_token, esc=esc, rl_blocked=rl_blocked, rl_hit=rl_hit,
+              tz_offset=TZ_OFFSET, notify_admin=_bm_notify_admin,
+              tg_post=lambda token, method, payload, read: tgbot._post(tgbot.API % (token, method), payload, 5, read))
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
