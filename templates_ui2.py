@@ -836,3 +836,33 @@ document.querySelectorAll('.ecell').forEach(function(c){c.addEventListener('clic
 <div class=card><h3>Test</h3>""", 1)
 
 TEMPLATES = T
+
+
+# ---- admin top menu -> left three-line (hamburger) drawer. Runs last, so every link added above is included.
+import re as _re
+_nav = T["abase.html"]
+_m = _re.search(r'<div class=nav>(.*?)</div>', _nav, _re.S)
+if _m:
+    _links = _re.findall(r'<a href="[^"]+"[^>]*>.*?</a>', _m.group(1), _re.S)
+    _main = [l for l in _links if '/admin/logout' not in l]
+    _out = [l for l in _links if '/admin/logout' in l]
+    _new = ('<style>.nav{display:none!important}'
+            '.atop{display:flex;align-items:center;gap:12px;padding:11px 16px;background:rgba(8,8,18,.75);backdrop-filter:blur(16px);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:20}'
+            '.aburger{width:46px;height:46px;border-radius:12px;border:1px solid var(--bd);background:var(--card);display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;padding:0;box-shadow:0 0 18px rgba(139,92,246,.25)}'
+            '.aburger i{display:block;width:22px;height:2.5px;border-radius:2px;background:#c4b5fd}'
+            '.aov{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:.25s;z-index:90}'
+            '.adr{position:fixed;top:0;left:0;bottom:0;width:290px;max-width:84vw;background:#07070f;border-right:1px solid rgba(139,92,246,.45);box-shadow:0 0 50px rgba(139,92,246,.3);transform:translateX(-105%);transition:.28s;z-index:100;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:6px}'
+            'body.aopen .aov{opacity:1;pointer-events:auto}body.aopen .adr{transform:none}'
+            '.adr a{display:block;padding:12px 14px;border-radius:12px;color:var(--tx);font-size:16px}.adr a:hover{background:rgba(139,92,246,.15)}'
+            '.adr a.on{background:linear-gradient(135deg,#8b5cf6,#6366f1);box-shadow:var(--gl)}'
+            '.adr .ax{align-self:flex-end;background:none;border:0;color:#fff;font-size:28px;cursor:pointer;line-height:1;padding:0 6px}'
+            '.adr .lo{margin-top:auto;border-top:1px solid var(--bd);padding-top:10px}</style>'
+            '<div class=atop><button type=button class=aburger id=aB aria-label="Menu"><i></i><i></i><i></i></button>'
+            '<b class=logo style="padding:7px 10px;display:inline-flex;align-items:center;gap:8px">{{ic(\'tool\')}} ADMIN</b></div>'
+            '<div class=aov id=aO></div><aside class=adr id=aD><button type=button class=ax id=aX aria-label="Close">&times;</button>'
+            + ''.join(_main) + ('<div class=lo>' + ''.join(_out) + '</div>' if _out else '') + '</aside>'
+            '<script>(function(){var b=document.body,o=function(v){b.classList.toggle("aopen",v)};'
+            'document.getElementById("aB").onclick=function(){o(true)};'
+            'document.getElementById("aX").onclick=document.getElementById("aO").onclick=function(){o(false)};'
+            'document.addEventListener("keydown",function(e){if(e.key==="Escape")o(false)})})();</script>')
+    T["abase.html"] = _nav[:_m.start()] + _new + _nav[_m.end():]
