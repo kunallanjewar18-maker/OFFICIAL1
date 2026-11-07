@@ -96,9 +96,13 @@ def init_db():
     for col, ddl in (("mode", "TEXT DEFAULT 'random'"), ("ext_url", "TEXT DEFAULT ''"),
                      ("ext_method", "TEXT DEFAULT 'POST'"), ("ext_headers", "TEXT DEFAULT ''"),
                      ("ext_body", "TEXT DEFAULT ''"), ("ext_path", "TEXT DEFAULT ''"),
-                     ("prov_pid", "INTEGER")):
+                     ("prov_pid", "INTEGER"), ("hours", "INTEGER NOT NULL DEFAULT 0")):
         if col not in cols:
             c.execute("ALTER TABLE plans ADD COLUMN %s %s" % (col, ddl))
+    for r_ in c.execute("SELECT id,name FROM plans WHERE hours=0").fetchall():
+        m_ = re.search(r"(\d+)\s*(hours?|hrs?|h)\b", (r_[1] or "").lower())
+        if m_:
+            c.execute("UPDATE plans SET hours=? WHERE id=?", (int(m_.group(1)), r_[0]))
     rcols = [r[1] for r in c.execute("PRAGMA table_info(resellers)")]
     for col, ddl in (("theme", "TEXT DEFAULT ''"), ("tg_chat", "TEXT DEFAULT ''"),
                      ("otp_on", "INTEGER NOT NULL DEFAULT 1"), ("notify", "INTEGER NOT NULL DEFAULT 1"),
@@ -134,9 +138,34 @@ app.jinja_env.filters["cur"] = _cur
 app.jinja_env.globals.update(BRAND=BRAND, year=time.gmtime().tm_year, CURRENCY=CURRENCY)
 
 
-def plan_label(days):
+def plan_label(days, hours=0):
+    """'1 Hour' / '3 Hours' when hours>0, else '1 Day' / '7 Days'."""
+    hours = int(hours or 0)
+    if hours > 0:
+        return "%d Hour%s" % (hours, "" if hours == 1 else "s")
     days = max(int(days), 1)
     return "%d Day%s" % (days, "" if days == 1 else "s")
+
+
+def plan_secs(pl):
+    """Real validity of a plan in seconds (hour plans use hours, others use days)."""
+    try:
+        h = int(pl["hours"] or 0)
+    except (KeyError, IndexError, TypeError, ValueError):
+        h = 0
+    return h * 3600 if h > 0 else max(int(pl["days"]), 1) * 86400
+
+
+def validity_text(pl):
+    """Text for bot alerts: '1 hours (1 HOURS)' or '1 days (1 DAYS)' - matches the real purchase."""
+    try:
+        h = int(pl["hours"] or 0)
+    except (KeyError, IndexError, TypeError, ValueError):
+        h = 0
+    if h > 0:
+        return "%d hours (%d HOURS)" % (h, h)
+    d = max(int(pl["days"]), 1)
+    return "%d days (%d DAYS)" % (d, d)
 
 
 def price_for(rid, plan):
@@ -239,6 +268,12 @@ def inr_of(p, cat):
     return round(price, 2)
 
 
+def parse_hours(text):
+    """Number of hours if the duration is an hour plan ('1 Hour', '3hr', '6 h'), else 0."""
+    m = re.search(r"(\d+)\s*(hours?|hrs?|h)\b", (text or "").lower())
+    return int(m.group(1)) if m else 0
+
+
 def parse_days(text):
     s = (text or "").lower()
     if "life" in s:
@@ -262,10 +297,10 @@ def catalog(rid):
     out = []
     for p in q("SELECT * FROM products ORDER BY id"):
         plans = []
-        for pl in q("SELECT * FROM plans WHERE product_id=? ORDER BY days, id", (p["id"],)):
+        for pl in q("SELECT * FROM plans WHERE product_id=? ORDER BY (CASE WHEN hours>0 THEN hours*3600 ELSE days*86400 END), id", (p["id"],)):
             price, custom = price_for(rid, pl)
             sc = q("SELECT COUNT(*) FROM stock WHERE plan_id=? AND used=0", (pl["id"],), one=True)[0]
-            plans.append(dict(id=pl["id"], name=pl["name"], days=pl["days"], price=price, custom=custom,
+            plans.append(dict(id=pl["id"], name=pl["name"], days=pl["days"], hours=pl["hours"] or 0, price=price, custom=custom,
                               mode=pl["mode"] or "random", stock=sc))
         out.append(dict(id=p["id"], name=p["name"], plans=plans))
     return out
@@ -280,7 +315,7 @@ def _dig(obj, path):
 def fetch_external(pl):
     """Call the provider API configured on the plan and return the key text."""
     import requests
-    rep = {"{days}": str(pl["days"]), "{plan}": pl["name"], "{product}": pl["pname"]}
+    rep = {"{days}": str(pl["days"]), "{hours}": str(pl["hours"] or 0), "{plan}": pl["name"], "{product}": pl["pname"]}
 
     def sub(t):
         for k, v in rep.items():
@@ -336,7 +371,7 @@ def buy(rid, plan_id, via="panel"):
             pre = re.sub(r"[^A-Z0-9]", "", pl["pname"].upper())[:6] or "KEY"
             raw = secrets.token_hex(8).upper()
             key = pre + "-" + "-".join(raw[i:i + 4] for i in range(0, 16, 4))
-        exp = now + int(pl["days"]) * 86400
+        exp = now + plan_secs(pl)
         c.execute("UPDATE resellers SET balance=balance-? WHERE id=?", (price, rid))
         if key:
             c.execute("INSERT INTO license_keys(reseller_id,product_name,plan_name,key,price,created,expires,via) "
@@ -659,16 +694,16 @@ def inr(v):
     return "%s INR" % money_txt(v)
 
 
-def purchase_text(pname, days, price, bal, key, via, buyer=None):
+def purchase_text(pname, validity, price, bal, key, via, buyer=None):
     line = "\u2500" * 16
     extra = ("\n\U0001F464 Bought by: <b>%s</b>\n\U0001F4B0 Reseller Current Balance: <b>%s</b>\n"
              % (esc(buyer), inr(bal))) if buyer else "\n"
     return ("<blockquote>\u2705 <b>NEW PURCHASE ALERT</b></blockquote>\n%s\n"
             "\u2705 Product: <b>%s</b>\n\U0001F6D2 Quantity: 1\n\U0001F4B0 Wallet Balance: <b>%s</b>\n"
-            "\u23F1 Validity: %d days (%d DAYS)\n\U0001F4B8 Paid: <b>%s</b>\n\U0001F6AB Paid by: Wallet (%s)\n"
+            "\u23F1 Validity: %s\n\U0001F4B8 Paid: <b>%s</b>\n\U0001F6AB Paid by: Wallet (%s)\n"
             "\U0001F552 Time: %s\n"
             "\U0001F511 Key Issued: <code>%s</code>%s%s"
-            % (line, esc(pname), inr(bal), int(days), int(days), inr(price),
+            % (line, esc(pname), inr(bal), esc(validity), inr(price),
                "API" if via == "api" else "Panel", fmt(time.time()), esc(key), extra, line))
 
 
@@ -687,7 +722,7 @@ def notify_purchase(r, pl, price, bal, key, via):
     try:                                                # admin always gets a copy (+ who bought, current balance)
         adm = tg_admin()
         if adm:
-            bot.send(adm, purchase_text(pl["pname"], pl["days"], price, bal, key, via, buyer=who),
+            bot.send(adm, purchase_text(pl["pname"], validity_text(pl), price, bal, key, via, buyer=who),
                      what="admin purchase alert (%s)" % who)
     except Exception as e:
         bot._note(False, "-", "admin purchase alert (%s)" % who, "error: %s" % str(e)[:150])
@@ -698,7 +733,7 @@ def notify_purchase(r, pl, price, bal, key, via):
         if not r["notify"]:
             bot._note(False, r["tg_chat"], "purchase alert (%s)" % who, "skipped: reseller turned alerts OFF (Security page)")
             return
-        items = [(purchase_text(pl["pname"], pl["days"], price, bal, key, via), None)]
+        items = [(purchase_text(pl["pname"], validity_text(pl), price, bal, key, via), None)]
         lim = r["low_bal"] or 0
         if lim > 0 and bal < lim:                       # wallet is under the limit -> warn after every purchase
             items.append((low_text(bal, lim), None))
@@ -1409,7 +1444,7 @@ def api_products():
         cat = [p for p in cat if p["id"] in want]
     return jsonify(success=True, currency="INR", count=len(cat), missing_ids=missing, products=[
         dict(product_id=p["id"], name=p["name"],
-             plans=[dict(plan_id=x["id"], name=x["name"], days=x["days"], price=x["price"],
+             plans=[dict(plan_id=x["id"], name=x["name"], days=x["days"], hours=x["hours"], price=x["price"],
                          currency="INR", available=(x["stock"] > 0 if x["mode"] == "stock" else True))
                     for x in p["plans"]])
         for p in cat])
@@ -1474,30 +1509,35 @@ def admin_products():
             q("INSERT INTO products(name) VALUES(?)", (request.form["name"].strip(),), commit=True)
         elif a == "plan":
             try:
-                days = max(int(num(request.form.get("days"), 1)), 1)
-                q("INSERT INTO plans(product_id,name,days,price,mode) VALUES(?,?,?,?,?)",
-                  (int(request.form["product_id"]), plan_label(days), days,
+                n = max(int(num(request.form.get("days"), 1)), 1)
+                hours = n if request.form.get("unit") == "hours" else 0
+                days = max(-(-n // 24), 1) if hours else n
+                q("INSERT INTO plans(product_id,name,days,hours,price,mode) VALUES(?,?,?,?,?,?)",
+                  (int(request.form["product_id"]), plan_label(days, hours), days, hours,
                    num(request.form.get("price")), request.form.get("mode", "stock")), commit=True)
             except Exception as e:
                 flash("Error: %s" % e, "err")
         elif a == "edit_plan":
-            days = max(int(num(request.form.get("days"), 1)), 1)
+            n = max(int(num(request.form.get("days"), 1)), 1)
+            hours = n if request.form.get("unit") == "hours" else 0
+            days = max(-(-n // 24), 1) if hours else n
             plid = int(request.form["plan_id"])
-            old = q("SELECT days,name,prov_pid FROM plans WHERE id=?", (plid,), one=True)
+            old = q("SELECT days,hours,name,prov_pid FROM plans WHERE id=?", (plid,), one=True)
             mode = request.form.get("mode", "stock")
             if old and mode == "provider" and not old["prov_pid"]:
                 flash("This plan is not linked to the main API", "err")
             elif old:
-                name = old["name"] if old["days"] == days else plan_label(days)
-                q("UPDATE plans SET name=?, days=?, price=?, mode=? WHERE id=?",
-                  (name, days, num(request.form.get("price")), mode, plid), commit=True)
+                same = old["days"] == days and (old["hours"] or 0) == hours
+                name = old["name"] if same else plan_label(days, hours)
+                q("UPDATE plans SET name=?, days=?, hours=?, price=?, mode=? WHERE id=?",
+                  (name, days, hours, num(request.form.get("price")), mode, plid), commit=True)
         elif a == "del_plan":
             q("DELETE FROM plans WHERE id=?", (int(request.form["plan_id"]),), commit=True)
         elif a == "del_product":
             q("DELETE FROM products WHERE id=?", (int(request.form["product_id"]),), commit=True)
         return redirect("/admin/products")
     prods = [dict(p=p, plans=[dict(pl=pl, stock=q("SELECT COUNT(*) FROM stock WHERE plan_id=? AND used=0", (pl["id"],), one=True)[0])
-                              for pl in q("SELECT * FROM plans WHERE product_id=? ORDER BY days,id", (p["id"],))])
+                              for pl in q("SELECT * FROM plans WHERE product_id=? ORDER BY (CASE WHEN hours>0 THEN hours*3600 ELSE days*86400 END), id", (p["id"],))])
              for p in q("SELECT * FROM products ORDER BY id")]
     return render_template("admin_products.html", prods=prods, page="products")
 
@@ -2019,8 +2059,8 @@ def admin_main_api_products():
                 prid = q("INSERT INTO products(name) VALUES(?)", (pname,), commit=True)
                 new_pr += 1
             dur = str(p.get("duration") or "1 Day").strip()
-            q("INSERT INTO plans(product_id,name,days,price,mode,prov_pid) VALUES(?,?,?,?,?,?)",
-              (prid, dur, parse_days(dur), price, "provider", pid), commit=True)
+            q("INSERT INTO plans(product_id,name,days,hours,price,mode,prov_pid) VALUES(?,?,?,?,?,?,?)",
+              (prid, dur, parse_days(dur), parse_hours(dur), price, "provider", pid), commit=True)
             new_pl += 1
         flash("Imported %d plan(s), %d new product(s). Updated prices: %d. Skipped (already there): %d."
               % (new_pl, new_pr, upd, skip), "ok")

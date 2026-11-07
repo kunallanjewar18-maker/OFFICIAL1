@@ -217,7 +217,7 @@ T["dashboard.html"] = """{% extends 'rbase.html' %}{% block c %}
 
 T["generate.html"] = """{% extends 'rbase.html' %}{% block c %}<h2>{{ic('key',24)}} Generate Key</h2><div class=mu>Balance: <b style="color:#34d399">{{r.balance|cur}}</b></div>
 {% for p in cat %}<div class=card><h3>{{p.name}}</h3>{% if not p.plans %}<div class=mu>No plans yet</div>{% endif %}
-<div class=tw><table>{% for pl in p.plans %}{% set out = pl.mode=='stock' and pl.stock==0 %}<tr><td>{{pl.name}}<div class=mu>{{pl.days}} day(s){% if pl.mode=='stock' %} · {{pl.stock}} in stock{% endif %}</div></td>
+<div class=tw><table>{% for pl in p.plans %}{% set out = pl.mode=='stock' and pl.stock==0 %}<tr><td>{{pl.name}}<div class=mu>{% if pl.hours %}{{pl.hours}} hour(s){% else %}{{pl.days}} day(s){% endif %}{% if pl.mode=='stock' %} · {{pl.stock}} in stock{% endif %}</div></td>
 <td><b style="color:#34d399">{{pl.price|cur}}</b>{% if pl.custom %} <span class="pill p">special</span>{% endif %}</td>
 <td style="text-align:right"><form method=post onsubmit="return confirm('Purchase {{pl.name}} for {{pl.price|cur}}?')">
 <input type=hidden name=plan_id value="{{pl.id}}"><button class=g {{'disabled' if out}}>{{'Out of stock' if out else 'Purchase Now'}}</button></form></td></tr>{% endfor %}</table></div></div>
@@ -266,18 +266,36 @@ T["admin_home.html"] = """{% extends 'abase.html' %}{% block c %}<h2>Overview</h
 {% for x in recent %}<tr><td>{{x.username}}</td><td>{{x.product_name}}</td><td>{{x.plan_name}}</td><td>{{x.price|cur}}</td><td>{{x.created|dt}}</td></tr>
 {% else %}<tr><td colspan=5>No sales yet</td></tr>{% endfor %}</table></div>{% endblock %}"""
 
-T["admin_products.html"] = """{% extends 'abase.html' %}{% block c %}<h2>Products &amp; Plans</h2>
-<div class=card><h3>Add Product</h3><form class=row method=post><input type=hidden name=action value=product><input name=name placeholder="Product name" required><button>Add</button></form></div>
-{% if prods %}<div class=card><h3>Add Plan</h3><form class=row method=post><input type=hidden name=action value=plan>
+T["admin_products.html"] = """{% extends 'abase.html' %}{% block c %}
+<style>
+.pm-top{display:flex;align-items:center;gap:12px;margin-bottom:6px}.pm-top h2{margin:0}
+.pm-burger{width:46px;height:46px;border-radius:12px;border:1px solid var(--bd);background:var(--card);display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;padding:0;box-shadow:0 0 18px rgba(139,92,246,.25)}
+.pm-burger i{display:block;width:22px;height:2.5px;border-radius:2px;background:#c4b5fd}
+.pm-ov{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:.25s;z-index:90}
+.pm-dr{position:fixed;top:0;left:0;bottom:0;width:340px;max-width:88vw;background:#07070f;border-right:1px solid rgba(139,92,246,.45);box-shadow:0 0 50px rgba(139,92,246,.3);transform:translateX(-105%);transition:.28s;z-index:100;overflow-y:auto;padding:18px}
+body.pm-open .pm-ov{opacity:1;pointer-events:auto}body.pm-open .pm-dr{transform:none}
+.pm-dr h3{margin:0 0 10px}.pm-dr .blk{border:1px solid var(--bd);border-radius:14px;padding:14px;margin:12px 0;background:rgba(255,255,255,.02)}
+.pm-dr form{display:flex;flex-direction:column;gap:8px}.pm-dr input,.pm-dr select,.pm-dr button{width:100%;box-sizing:border-box}
+.pm-x{float:right;background:none;border:0;color:#fff;font-size:26px;cursor:pointer;width:auto!important}
+.pm-dr .two{display:flex;gap:8px}.pm-dr .two>*{flex:1;min-width:0}
+</style>
+<div class=pm-top><button type=button class=pm-burger id=pmB aria-label="Menu"><i></i><i></i><i></i></button><h2>Products &amp; Plans</h2></div>
+<div class=pm-ov id=pmO></div>
+<aside class=pm-dr id=pmD><button type=button class=pm-x id=pmX aria-label="Close">&times;</button><h3>Add / Manage</h3>
+<div class=blk><h3>{{ic('plus')}} Add Product</h3><form method=post><input type=hidden name=action value=product><input name=name placeholder="Product name" required><button>Add Product</button></form></div>
+{% if prods %}<div class=blk><h3>{{ic('plus')}} Add Plan</h3><form method=post><input type=hidden name=action value=plan>
 <select name=product_id>{% for x in prods %}<option value="{{x.p.id}}">{{x.p.name}}</option>{% endfor %}</select>
-<input name=days type=number min=1 placeholder="Days (e.g. 1)" required style="width:130px">
-<input name=price type=number step=any min=0 placeholder="Price" required style="width:120px">
-<select name=mode><option value=stock>Manual keys</option><option value=api>External API</option><option value=random>Auto-generate</option></select><button>{{ic('plus')}} Add Plan</button></form><p class=hint>Plan name is made automatically from the days (1 &rarr; "1 Day", 7 &rarr; "7 Days"). Choose how keys are supplied: Manual keys, External API, or Auto-generate.</p></div>{% endif %}
+<div class=two><input name=days type=number min=1 placeholder="Time (e.g. 1)" required><select name=unit><option value=days>Days</option><option value=hours>Hours</option></select></div>
+<input name=price type=number step=any min=0 placeholder="Price" required>
+<select name=mode><option value=stock>Manual keys</option><option value=api>External API</option><option value=random>Auto-generate</option></select><button>Add Plan</button></form>
+<p class=hint>Pick Hours or Days. 1 Hours &rarr; "1 Hour", 3 Hours &rarr; "3 Hours", 7 Days &rarr; "7 Days". Bot alerts and keys use exactly what was bought.</p></div>{% endif %}
+</aside>
+<script>(function(){var b=document.body,o=function(v){b.classList.toggle('pm-open',v)};document.getElementById('pmB').onclick=function(){o(true)};document.getElementById('pmX').onclick=document.getElementById('pmO').onclick=function(){o(false)};document.addEventListener('keydown',function(e){if(e.key==='Escape')o(false)})})();</script>
 {% for x in prods %}<div class=card><div style="display:flex;justify-content:space-between;align-items:center"><h3>{{x.p.name}}</h3>
 <form method=post onsubmit="return confirm('Delete product and all plans?')"><input type=hidden name=action value=del_product><input type=hidden name=product_id value="{{x.p.id}}"><button class=r>Delete</button></form></div>
-<div class=tw><table class=plans><tr><th>ID</th><th>Days</th><th>Price</th><th>Key source</th><th></th></tr>
+<div class=tw><table class=plans><tr><th>ID</th><th>Time</th><th>Price</th><th>Key source</th><th></th></tr>
 {% for e in x.plans %}{% set pl=e.pl %}<tr><form method=post><input type=hidden name=action value=edit_plan><input type=hidden name=plan_id value="{{pl.id}}">
-<td>{{pl.id}}</td><td><input name=days type=number value="{{pl.days}}" style="width:65px"></td>
+<td>{{pl.id}}</td><td style="white-space:nowrap"><input name=days type=number min=1 value="{{pl.hours if pl.hours else pl.days}}" style="width:65px"> <select name=unit style="width:88px"><option value=days {{'' if pl.hours else 'selected'}}>Days</option><option value=hours {{'selected' if pl.hours}}>Hours</option></select></td>
 <td><input name=price type=number step=any value="{{pl.price}}" style="width:90px"></td>
 <td><select name=mode>{% for v,l in [('stock','Manual keys'),('api','External API'),('random','Auto-generate')] %}<option value="{{v}}" {{'selected' if (pl.mode or 'random')==v}}>{{l}}</option>{% endfor %}{% if pl.prov_pid %}<option value="provider" {{'selected' if pl.mode=='provider'}}>Main API #{{pl.prov_pid}}</option>{% endif %}</select></td>
 <td style="white-space:nowrap"><button class=g>Save</button></form>
@@ -304,7 +322,7 @@ T["admin_plan_api.html"] = """{% extends 'abase.html' %}{% block c %}<a href="/a
 <p class=mu>Headers (JSON)</p><textarea name=ext_headers placeholder='{"X-API-Key": "PROVIDER_KEY"}'>{{pl.ext_headers or ''}}</textarea>
 <p class=mu>Body / params (JSON)</p><textarea name=ext_body placeholder='{"duration": "{days}"}'>{{pl.ext_body or ''}}</textarea>
 <p class=mu>Key location in the response (e.g. <code>data.key</code>). Empty = whole response text.</p><input name=ext_path value="{{pl.ext_path or ''}}" placeholder="data.key" style="width:100%">
-<p class=mu>Placeholders: <code>{days}</code> <code>{plan}</code> <code>{product}</code>. If the provider fails, the reseller's balance is refunded automatically.</p>
+<p class=mu>Placeholders: <code>{days}</code> <code>{hours}</code> <code>{plan}</code> <code>{product}</code>. If the provider fails, the reseller's balance is refunded automatically.</p>
 <button class=g>{{ic('save')}} Save API Settings</button></form></div>{% endblock %}"""
 
 T["admin_keys.html"] = """{% extends 'abase.html' %}{% block c %}<h2>Sold Keys</h2><div class="card tw"><table>
